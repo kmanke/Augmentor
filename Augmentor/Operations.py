@@ -51,16 +51,26 @@ class Operation(object):
     the section on extending Augmentor with custom operations at
     :ref:`extendingaugmentor`.
     """
-    def __init__(self, probability):
+    def __init__(self, probability, affects_images, affects_masks):
         """
         All operations must at least have a :attr:`probability` which is
         initialised when creating the operation's object.
+        If affects_masks is False, then perform_operation will return the
+        list of masks unaugmented.
 
         :param probability: Controls the probability that the operation is
          performed when it is invoked in the pipeline.
         :type probability: Float
+        :param affects_images: Flag to determine whether this operation should
+         be performed on images.
+        :type affects_masks: Boolean
+        :param affects_masks: Flag to determine whether this operation should
+         be performed on masks.
+        :type affects_masks: Boolean
         """
         self.probability = probability
+        self.affects_images = affects_images
+        self.affects_masks = affects_masks
 
     def __str__(self):
         """
@@ -73,27 +83,50 @@ class Operation(object):
         """
         return self.__class__.__name__
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
-        Perform the operation on the passed images. Each operation must at least
+        Perform the operation on the passed images and masks. Each operation must at least
         have this function, which accepts a list containing objects of type
         PIL.Image, performs its operation, and returns a new list containing
         objects of type PIL.Image.
 
         :param images: The image(s) to transform.
         :type images: List containing PIL.Image object(s).
-        :return: The transformed image(s) as a list of object(s) of type
+        :param masks: The mask(s) to transform.
+        :type masks: List containing PIL.Image object(s).
+        :return: The transformed image(s) and mask(s) lists of object(s) of type
          PIL.Image.
         """
         raise RuntimeError("Illegal call to base class.")
 
+    def _augment(self, image_augment_fn, mask_augment_fn, images, masks):
+        augmented_images = []
+        augmented_masks = []
 
+        if self.affects_images:
+            for image in images:
+                augmented_images.append(image_augment_fn(image))
+        else:
+            augmented_images = images
+
+        if self.affects_masks:
+            if mask_augment_fn is None:
+                mask_augment_fn = image_augment_fn
+                
+            for mask in masks:
+                augmented_masks.append(mask_augment_fn(mask))
+        else:
+            augmented_masks = masks
+
+        return augmented_images, augmented_masks
+
+    
 class HistogramEqualisation(Operation):
     """
     The class :class:`HistogramEqualisation` is used to perform histogram
     equalisation on images passed to its :func:`perform_operation` function.
     """
-    def __init__(self, probability):
+    def __init__(self, probability, affects_images=True, affects_masks=False):
         """
         As there are no further user definable parameters, the class is
         instantiated using only the :attr:`probability` argument.
@@ -102,9 +135,9 @@ class HistogramEqualisation(Operation):
          performed when it is invoked in the pipeline.
         :type probability: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Performs histogram equalisation on the images passed as an argument
         and returns the equalised images. There are no user definable
@@ -113,8 +146,10 @@ class HistogramEqualisation(Operation):
         :param images: The image(s) on which to perform the histogram
          equalisation.
         :type images: List containing PIL.Image object(s).
-        :return: The transformed image(s) as a list of object(s) of type
-         PIL.Image.
+        :param masks: The mask(s) on which to perform the Operation.
+        :type masks: List containing PIL.Image objects(s).
+        :return: The a tuple of the transformed images and masks as a list
+         of object(s) of type PIL.Image.
         """
         # If an image is a colour image, the histogram will
         # will be computed on the flattened image, which fires
@@ -125,12 +160,7 @@ class HistogramEqualisation(Operation):
                 warnings.simplefilter("ignore")
                 return ImageOps.equalize(image)
 
-        augmented_images = []
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
 
 class Greyscale(Operation):
     """
@@ -140,7 +170,7 @@ class Greyscale(Operation):
 
     .. seealso:: The :class:`BlackAndWhite` class.
     """
-    def __init__(self, probability):
+    def __init__(self, probability, affects_images=True, affects_masks=False):
         """
         As there are no further user definable parameters, the class is
         instantiated using only the :attr:`probability` argument.
@@ -149,13 +179,15 @@ class Greyscale(Operation):
          performed when it is invoked in the pipeline.
         :type probability: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Converts the passed image to greyscale and returns the transformed
         image. There are no user definable parameters for this method.
 
+        This Operation does not affect masks.
+        
         :param images: The image to convert to greyscale.
         :type images: List containing PIL.Image object(s).
         :return: The transformed image(s) as a list of object(s) of type
@@ -165,20 +197,15 @@ class Greyscale(Operation):
         def do(image):
             return ImageOps.grayscale(image)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
+    
 
 class Invert(Operation):
     """
     This class is used to negate images. That is to reverse the pixel values
     for any image processed by it.
     """
-    def __init__(self, probability):
+    def __init__(self, probability, affects_images=True, affects_masks=False):
         """
         As there are no further user definable parameters, the class is
         instantiated using only the :attr:`probability` argument.
@@ -187,9 +214,9 @@ class Invert(Operation):
          performed when it is invoked in the pipeline.
         :type probability: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Negates the image passed as an argument. There are no user definable
         parameters for this method.
@@ -203,13 +230,7 @@ class Invert(Operation):
         def do(image):
             return ImageOps.invert(image)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
 
 class BlackAndWhite(Operation):
     """
@@ -220,7 +241,8 @@ class BlackAndWhite(Operation):
 
     .. seealso:: The :class:`Greyscale` class.
     """
-    def __init__(self, probability, threshold):
+    def __init__(self, probability, threshold, affects_images=True,
+                 affects_masks=False):
         """
         As well as the required :attr:`probability` parameter, a
         :attr:`threshold` can also be defined to define the cutoff point where
@@ -235,10 +257,10 @@ class BlackAndWhite(Operation):
         :type probability: Float
         :type threshold: Integer
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.threshold = threshold
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Convert the image passed as an argument to black and white, 1-bit
         monochrome. Uses the :attr:`threshold` passed to the constructor
@@ -258,19 +280,14 @@ class BlackAndWhite(Operation):
             image = ImageOps.grayscale(image)
             return image.point(lambda x: 0 if x < self.threshold else 255, '1')
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
 
 class RandomBrightness(Operation):
     """
     This class is used to random change image brightness.
     """
-    def __init__(self, probability, min_factor, max_factor):
+    def __init__(self, probability, min_factor, max_factor,
+                 affects_images=True, affects_masks=False):
         """
         required :attr:`probability` parameter
 
@@ -289,11 +306,11 @@ class RandomBrightness(Operation):
         :type max_factor: Float
         :type max_factor: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.min_factor = min_factor
         self.max_factor = max_factor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Random change the passed image brightness.
 
@@ -309,19 +326,14 @@ class RandomBrightness(Operation):
             image_enhancer_brightness = ImageEnhance.Brightness(image)
             return image_enhancer_brightness.enhance(factor)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
 
 class RandomColor(Operation):
     """
     This class is used to random change saturation of an image.
     """
-    def __init__(self, probability, min_factor, max_factor):
+    def __init__(self, probability, min_factor, max_factor,
+                 affects_images=True, affects_masks=False):
         """
         required :attr:`probability` parameter
 
@@ -340,11 +352,11 @@ class RandomColor(Operation):
         :type max_factor: Float
         :type max_factor: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.min_factor = min_factor
         self.max_factor = max_factor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Random change the passed image saturation.
 
@@ -360,19 +372,15 @@ class RandomColor(Operation):
             image_enhancer_color = ImageEnhance.Color(image)
             return image_enhancer_color.enhance(factor)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
+        
 
 class RandomContrast(Operation):
     """
     This class is used to random change contrast of an image.
     """
-    def __init__(self, probability, min_factor,max_factor):
+    def __init__(self, probability, min_factor, max_factor,
+                 affects_images=True, affects_masks=False):
         """
         required :attr:`probability` parameter
 
@@ -391,14 +399,14 @@ class RandomContrast(Operation):
         :type max_factor: Float
         :type max_factor: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.min_factor = min_factor
         self.max_factor = max_factor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Random change the passed image contrast.
-
+        
         :param images: The image to convert into monochrome.
         :type images: List containing PIL.Image object(s).
         :return: The transformed image(s) as a list of object(s) of type
@@ -411,20 +419,16 @@ class RandomContrast(Operation):
             image_enhancer_contrast = ImageEnhance.Contrast(image)
             return image_enhancer_contrast.enhance(factor)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
+        
 
 class Skew(Operation):
     """
     This class is used to perform perspective skewing on images. It allows
     for skewing from a total of 12 different perspectives.
     """
-    def __init__(self, probability, skew_type, magnitude):
+    def __init__(self, probability, skew_type, magnitude,
+                 affects_images=True, affects_masks=True):
         """
         As well as the required :attr:`probability` parameter, the type of
         skew that is performed is controlled using a :attr:`skew_type` and a
@@ -464,7 +468,7 @@ class Skew(Operation):
         :type skew_type: String
         :type magnitude: Integer
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.skew_type = skew_type
         self.magnitude = magnitude
 
@@ -610,20 +614,21 @@ class Skew(Operation):
         perspective_skew_coefficients_matrix = np.dot(np.linalg.pinv(A), B)
         perspective_skew_coefficients_matrix = np.array(perspective_skew_coefficients_matrix).reshape(8)
 
-        def do(image):
+        def do_image(image):
             return image.transform(image.size,
                                    Image.PERSPECTIVE,
                                    perspective_skew_coefficients_matrix,
                                    resample=Image.BICUBIC)
 
-        augmented_images = []
+        # Do not use bicubic interpolation on masks.
+        def do_mask(mask):
+            return mask.transform(mask.size,
+                                  Image.PERSPECTIVE,
+                                  perspective_skew_coefficients_matrix,
+                                  resample=Image.NEAREST)
+        return self._augment(do_image, do_mask, images, masks)
 
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
-
+    
 class RotateStandard(Operation):
     """
     Class to perform rotations without automatically cropping the images,
@@ -634,17 +639,19 @@ class RotateStandard(Operation):
     .. seealso:: For 90 degree rotations, see the :class:`Rotate` class.
     """
 
-    def __init__(self, probability, max_left_rotation, max_right_rotation, expand=False, fillcolor=None):
+    def __init__(self, probability, max_left_rotation, max_right_rotation,
+                 expand=False, fillcolor=None,
+                 affects_images=True, affects_masks=True):
         """
         Documentation to appear.
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.max_left_rotation = -abs(max_left_rotation)   # Ensure always negative
         self.max_right_rotation = abs(max_right_rotation)  # Ensure always positive
         self.expand = expand
         self.fillcolor = fillcolor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Documentation to appear.
 
@@ -665,16 +672,18 @@ class RotateStandard(Operation):
         elif left_or_right == 1:
             rotation = random_right
 
-        def do(image):
-            return image.rotate(rotation, expand=self.expand, resample=Image.BICUBIC, fillcolor=self.fillcolor)
+        def do_image(image):
+            return image.rotate(rotation, expand=self.expand,
+                                resample=Image.BICUBIC,
+                                fillcolor=self.fillcolor)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        # Do not use bicubic interpolation on masks.
+        def do_mask(mask):
+            return image.rotate(rotation, expand=self.expand,
+                                resample=Image.NEAREST,
+                                fillcolor=self.fillcolor)
+        
+        return self._augment(do_image, do_mask, images, masks)
 
 class Rotate(Operation):
     """
@@ -683,7 +692,8 @@ class Rotate(Operation):
     class.
     """
 
-    def __init__(self, probability, rotation):
+    def __init__(self, probability, rotation, affects_images=True,
+                 affects_masks=True):
         """
         As well as the required :attr:`probability` parameter, the
         :attr:`rotation` parameter controls the rotation to perform,
@@ -702,13 +712,13 @@ class Rotate(Operation):
         .. seealso:: For arbitrary rotations, see the :class:`RotateRange` class.
 
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.rotation = rotation
 
     def __str__(self):
         return "Rotate " + str(self.rotation)
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Rotate an image by either 90, 180, or 270 degrees, or randomly from
         any of these.
@@ -727,13 +737,8 @@ class Rotate(Operation):
             else:
                 return image.rotate(self.rotation, expand=True)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
+    
 
 class RotateRange(Operation):
     """
@@ -758,7 +763,8 @@ class RotateRange(Operation):
     The :ref:`rotating` section describes this in detail and has example
     images to demonstrate this.
     """
-    def __init__(self, probability, max_left_rotation, max_right_rotation):
+    def __init__(self, probability, max_left_rotation, max_right_rotation,
+                 affects_images=True, affects_masks=True):
         """
         As well as the required :attr:`probability` parameter, the
         :attr:`max_left_rotation` parameter controls the maximum number of
@@ -776,11 +782,11 @@ class RotateRange(Operation):
         :type max_left_rotation: Integer
         :type max_right_rotation: Integer
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.max_left_rotation = -abs(max_left_rotation)   # Ensure always negative
         self.max_right_rotation = abs(max_right_rotation)  # Ensure always positive
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Perform the rotation on the passed :attr:`image` and return
         the transformed image. Uses the :attr:`max_left_rotation` and
@@ -807,13 +813,13 @@ class RotateRange(Operation):
         elif left_or_right == 1:
             rotation = random_right
 
-        def do(image):
+        def do(image, resample):
             # Get size before we rotate
             x = image.size[0]
             y = image.size[1]
 
             # Rotate, while expanding the canvas size
-            image = image.rotate(rotation, expand=True, resample=Image.BICUBIC)
+            image = image.rotate(rotation, expand=True, resample=resample)
 
             # Get size after rotation, which includes the empty space
             X = image.size[0]
@@ -843,21 +849,24 @@ class RotateRange(Operation):
             image = image.crop((int(round(E)), int(round(A)), int(round(X - E)), int(round(Y - A))))
 
             # Return the image, re-sized to the size of the image passed originally
-            return image.resize((x, y), resample=Image.BICUBIC)
+            return image.resize((x, y), resample=resample)
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
+        
+        return self._augment(do_image, do_mask, images, masks)
+        
 
 class Resize(Operation):
     """
     This class is used to resize images by absolute values passed as parameters.
     """
-    def __init__(self, probability, width, height, resample_filter):
+    def __init__(self, probability, width, height, image_resample_filter,
+                 mask_resample_filter, affects_images=True,
+                 affects_masks=True):
         """
         Accepts the required probability parameter as well as parameters
         to control the size of the transformed image.
@@ -874,7 +883,7 @@ class Resize(Operation):
         :type height: Integer
         :type resample_filter: String
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.width = width
         self.height = height
         self.resample_filter = resample_filter
@@ -890,17 +899,18 @@ class Resize(Operation):
          PIL.Image.
         """
 
-        def do(image):
-            # TODO: Automatically change this to ANTIALIAS or BICUBIC depending on the size of the file
-            return image.resize((self.width, self.height), eval("Image.%s" % self.resample_filter))
+        def do(image, resample):
+            return image.resize((self.width, self.height),
+                                eval("Image.%s" % resample))
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, image_resample_filter)
 
-        for image in images:
-            augmented_images.append(do(image))
+        def do_mask(mask):
+            return do(mask, mask_resample_filter)
 
-        return augmented_images
-
+        return self._augment(do_image, do_mask, images, masks)
+    
 
 class Flip(Operation):
     """
@@ -909,7 +919,8 @@ class Flip(Operation):
     The class allows an image to be mirrored along either
     its x axis or its y axis, or randomly.
     """
-    def __init__(self, probability, top_bottom_left_right):
+    def __init__(self, probability, top_bottom_left_right,
+                 affects_images=True, affects_masks=True):
         """
         The direction of the flip, or whether it should be randomised, is
         controlled using the :attr:`top_bottom_left_right` parameter.
@@ -925,10 +936,10 @@ class Flip(Operation):
          - ``RANDOM`` defines that the image is mirrored randomly along
            either the x or y axis.
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.top_bottom_left_right = top_bottom_left_right
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Mirror the image according to the `attr`:top_bottom_left_right`
         argument passed to the constructor and return the mirrored image.
@@ -952,19 +963,15 @@ class Flip(Operation):
                 elif random_axis == 1:
                     return image.transpose(Image.FLIP_TOP_BOTTOM)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
+    
 
 class Crop(Operation):
     """
     This class is used to crop images by absolute values passed as parameters.
     """
-    def __init__(self, probability, width, height, centre):
+    def __init__(self, probability, width, height, centre,
+                 affects_images=True, affects_masks=True):
         """
         As well as the always required :attr:`probability` parameter, the
         constructor requires a :attr:`width` to control the width of
@@ -985,12 +992,12 @@ class Crop(Operation):
         :type height: Integer
         :type centre: Boolean
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.width = width
         self.height = height
         self.centre = centre
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Crop an area from an image, either from a random location or centred,
         using the dimensions supplied during instantiation.
@@ -1017,19 +1024,16 @@ class Crop(Operation):
             else:
                 return image.crop((left_shift, down_shift, self.width + left_shift, self.height + down_shift))
 
-        augmented_images = []
+        return self._augment(do, do, images, masks)
 
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
-
+    
 class CropPercentage(Operation):
     """
     This class is used to crop images by a percentage of their area.
     """
-    def __init__(self, probability, percentage_area, centre, randomise_percentage_area):
+    def __init__(self, probability, percentage_area, centre,
+                 randomise_percentage_area,
+                 affects_images=True, affects_masks=True):
         """
         As well as the always required :attr:`probability` parameter, the
         constructor requires a :attr:`percentage_area` to control the area
@@ -1048,12 +1052,12 @@ class CropPercentage(Operation):
         :type percentage_area: Float
         :type centre: Boolean
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.percentage_area = percentage_area
         self.centre = centre
         self.randomise_percentage_area = randomise_percentage_area
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Crop the passed :attr:`images` by percentage area, returning the crop as an
         image.
@@ -1084,13 +1088,8 @@ class CropPercentage(Operation):
             else:
                 return image.crop((left_shift, down_shift, w_new + left_shift, h_new + down_shift))
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
+            
 
 class CropRandom(Operation):
     """
@@ -1098,7 +1097,8 @@ class CropRandom(Operation):
      of the user-facing functions in the :class:`~Augmentor.Pipeline.Pipeline`
      class.
     """
-    def __init__(self, probability, percentage_area):
+    def __init__(self, probability, percentage_area, affects_images=True,
+                 affects_masks=True):
         """
         :param probability: Controls the probability that the operation is
          performed when it is invoked in the pipeline.
@@ -1106,10 +1106,10 @@ class CropRandom(Operation):
          to crop. A value of 0.5 would crop an area that is 50% of the area
          of the original image's size.
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.percentage_area = percentage_area
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Randomly crop the passed image, returning the crop as a new image.
 
@@ -1130,12 +1130,7 @@ class CropRandom(Operation):
         def do(image):
             return image.crop((random_left_shift, random_down_shift, w_new + random_left_shift, h_new + random_down_shift))
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
+        return self._augment(do, do, images, masks)
 
 
 class Shear(Operation):
@@ -1154,7 +1149,8 @@ class Shear(Operation):
 
     For sample code with image examples see :ref:`shearing`.
     """
-    def __init__(self, probability, max_shear_left, max_shear_right):
+    def __init__(self, probability, max_shear_left, max_shear_right,
+                 affects_images=True, affects_masks=True):
         """
         The shearing is randomised in magnitude, from 0 to the
         :attr:`max_shear_left` or 0 to :attr:`max_shear_right` where the
@@ -1170,11 +1166,11 @@ class Shear(Operation):
         :type max_shear_left: Integer
         :type max_shear_right: Integer
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.max_shear_left = max_shear_left
         self.max_shear_right = max_shear_right
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Shears the passed image according to the parameters defined during
         instantiation, and returns the sheared image.
@@ -1230,7 +1226,7 @@ class Shear(Operation):
         directions = ["x", "y"]
         direction = random.choice(directions)
 
-        def do(image):
+        def do(image, resample):
 
             # We use the angle phi in radians later
             phi = math.tan(math.radians(angle_to_shear))
@@ -1264,11 +1260,11 @@ class Shear(Operation):
                 image = image.transform((int(round(width + shift_in_pixels)), height),
                                         Image.AFFINE,
                                         transform_matrix,
-                                        Image.BICUBIC)
+                                        resample)
 
                 image = image.crop((abs(shift_in_pixels), 0, width, height))
 
-                return image.resize((width, height), resample=Image.BICUBIC)
+                return image.resize((width, height), resample=resample)
 
             elif direction == "y":
                 shift_in_pixels = phi * width
@@ -1285,19 +1281,20 @@ class Shear(Operation):
                 image = image.transform((width, int(round(height + shift_in_pixels))),
                                         Image.AFFINE,
                                         transform_matrix,
-                                        Image.BICUBIC)
+                                        resample)
 
                 image = image.crop((0, abs(shift_in_pixels), width, height))
 
-                return image.resize((width, height), resample=Image.BICUBIC)
+                return image.resize((width, height), resample=resample)
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        for image in images:
-            augmented_images.append(do(image))
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
 
-        return augmented_images
-
+        return self._augment(do_image, do_mask, images, masks)
+        
 
 class Scale(Operation):
     """
@@ -1310,7 +1307,8 @@ class Scale(Operation):
     This function will return images that are **larger** than the input
     images.
     """
-    def __init__(self, probability, scale_factor):
+    def __init__(self, probability, scale_factor, affects_images=True,
+                 affects_masks=True):
         """
         As the aspect ratio is always kept constant, only a
         :attr:`scale_factor` is required for scaling the image.
@@ -1322,10 +1320,10 @@ class Scale(Operation):
         :type probability: Float
         :type scale_factor: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.scale_factor = scale_factor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Scale the passed :attr:`images` by the factor specified during
         instantiation, returning the scaled image.
@@ -1336,27 +1334,29 @@ class Scale(Operation):
          PIL.Image.
         """
 
-        def do(image):
+        def do(image, resample):
             w, h = image.size
 
             new_h = int(h * self.scale_factor)
             new_w = int(w * self.scale_factor)
 
-            return image.resize((new_w, new_h), resample=Image.BICUBIC)
+            return image.resize((new_w, new_h), resample=resample)
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        for image in images:
-            augmented_images.append(do(image))
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
 
-        return augmented_images
+        return self._augment(do_image, do_mask, images, masks)
 
 
 class Distort(Operation):
     """
     This class performs randomised, elastic distortions on images.
     """
-    def __init__(self, probability, grid_width, grid_height, magnitude):
+    def __init__(self, probability, grid_width, grid_height, magnitude,
+                 affects_images=True, affects_masks=True):
         """
         As well as the probability, the granularity of the distortions
         produced by this class can be controlled using the width and
@@ -1379,14 +1379,14 @@ class Distort(Operation):
         :type grid_height: Integer
         :type magnitude: Integer
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.grid_width = grid_width
         self.grid_height = grid_height
         self.magnitude = abs(magnitude)
         # TODO: Implement non-random magnitude.
         self.randomise_magnitude = True
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Distorts the passed image(s) according to the parameters supplied during
         instantiation, returning the newly distorted image.
@@ -1484,23 +1484,26 @@ class Distort(Operation):
         for i in range(len(dimensions)):
             generated_mesh.append([dimensions[i], polygons[i]])
 
-        def do(image):
+        def do(image, resample):
+            return image.transform(image.size, Image.MESH, generated_mesh,
+                                   resample=resample)
 
-            return image.transform(image.size, Image.MESH, generated_mesh, resample=Image.BICUBIC)
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
+        
+        return self._augment(do_image, do_mask, images, masks)
+    
 
 class GaussianDistortion(Operation):
     """
     This class performs randomised, elastic gaussian distortions on images.
     """
-    def __init__(self, probability, grid_width, grid_height, magnitude, corner, method, mex, mey, sdx, sdy):
+    def __init__(self, probability, grid_width, grid_height, magnitude,
+                 corner, method, mex, mey, sdx, sdy,
+                 affects_images=True, affects_masks=True):
         """
         As well as the probability, the granularity of the distortions
         produced by this class can be controlled using the width and
@@ -1549,7 +1552,7 @@ class GaussianDistortion(Operation):
 
          e^{- \Big( \\frac{(x-\\text{mex})^2}{\\text{sdx}} + \\frac{(y-\\text{mey})^2}{\\text{sdy}} \Big) }
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.grid_width = grid_width
         self.grid_height = grid_height
         self.magnitude = abs(magnitude)
@@ -1561,7 +1564,7 @@ class GaussianDistortion(Operation):
         self.sdx = sdx
         self.sdy = sdy
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Distorts the passed image(s) according to the parameters supplied
         during instantiation, returning the newly distorted image.
@@ -1651,7 +1654,7 @@ class GaussianDistortion(Operation):
 
             return res
 
-        def do(image):
+        def do(image, resample):
 
             for a, b, c, d in polygon_indices:
                 x1, y1, x2, y2, x3, y3, x4, y4 = polygons[a]
@@ -1686,22 +1689,24 @@ class GaussianDistortion(Operation):
             for i in range(len(dimensions)):
                 generated_mesh.append([dimensions[i], polygons[i]])
 
-            return image.transform(image.size, Image.MESH, generated_mesh, resample=Image.BICUBIC)
+            return image.transform(image.size, Image.MESH, generated_mesh, resample=resample)
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        for image in images:
-            augmented_images.append(do(image))
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
 
-        return augmented_images
-
+        return self._augment(do_image, do_mask, images, masks)
+    
 
 class Zoom(Operation):
     """
     This class is used to enlarge images (to zoom) but to return a cropped
     region of the zoomed image of the same size as the original image.
     """
-    def __init__(self, probability, min_factor, max_factor):
+    def __init__(self, probability, min_factor, max_factor,
+                 affects_images=True, affects_masks=True):
         """
         The amount of zoom applied is randomised, from between
         :attr:`min_factor` and :attr:`max_factor`. Set these both to the same
@@ -1719,11 +1724,11 @@ class Zoom(Operation):
         :type min_factor: Float
         :type max_factor: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.min_factor = min_factor
         self.max_factor = max_factor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Zooms/scales the passed image(s) and returns the new image.
 
@@ -1734,12 +1739,12 @@ class Zoom(Operation):
         """
         factor = round(random.uniform(self.min_factor, self.max_factor), 2)
 
-        def do(image):
+        def do(image, resample):
             w, h = image.size
 
             image_zoomed = image.resize((int(round(image.size[0] * factor)),
                                          int(round(image.size[1] * factor))),
-                                         resample=Image.BICUBIC)
+                                         resample=resample)
             w_zoomed, h_zoomed = image_zoomed.size
 
             return image_zoomed.crop((floor((float(w_zoomed) / 2) - (float(w) / 2)),
@@ -1747,20 +1752,22 @@ class Zoom(Operation):
                                       floor((float(w_zoomed) / 2) + (float(w) / 2)),
                                       floor((float(h_zoomed) / 2) + (float(h) / 2))))
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
+        
+        return self._augment(do_image, do_mask, images, masks)
+    
 
 class ZoomRandom(Operation):
     """
     This class is used to zoom into random areas of the image.
     """
 
-    def __init__(self, probability, percentage_area, randomise):
+    def __init__(self, probability, percentage_area, randomise,
+                 affects_images=True, affects_masks=True):
         """
         Zooms into a random area of the image, rather than the centre of
         the image, as is done by :class:`Zoom`. The zoom factor is fixed
@@ -1776,11 +1783,11 @@ class ZoomRandom(Operation):
          upper bound, and randomises the zoom level from between 0.1 and
          :attr:`percentage_area`.
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.percentage_area = percentage_area
         self.randomise = randomise
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Randomly zoom into the passed :attr:`images` by first cropping the image
         based on the :attr:`percentage_area` argument, and then resizing the
@@ -1806,32 +1813,34 @@ class ZoomRandom(Operation):
         random_left_shift = random.randint(0, (w - w_new))  # Note: randint() is from uniform distribution.
         random_down_shift = random.randint(0, (h - h_new))
 
-        def do(image):
+        def do(image, resample):
             image = image.crop((random_left_shift, random_down_shift, w_new + random_left_shift, h_new + random_down_shift))
+            return image.resize((w, h), resample=resample)
 
-            return image.resize((w, h), resample=Image.BICUBIC)
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        augmented_images = []
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
 
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do_image, do_mask, images, masks)
+    
 
 class HSVShifting(Operation):
     """
     CURRENTLY NOT IMPLEMENTED.
     """
-    def __init__(self, probability, hue_shift, saturation_scale, saturation_shift, value_scale, value_shift):
-        Operation.__init__(self, probability)
+    def __init__(self, probability, hue_shift, saturation_scale,
+                 saturation_shift, value_scale, value_shift,
+                 affects_images=True, affects_masks=False):
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.hue_shift = hue_shift
         self.saturation_scale = saturation_scale
         self.saturation_shift = saturation_shift
         self.value_scale = value_scale
         self.value_shift = value_shift
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
 
         def do(image):
             hsv = np.array(image.convert("HSV"), 'float64')
@@ -1848,13 +1857,7 @@ class HSVShifting(Operation):
 
             return Image.fromarray(hsv, "HSV").convert("RGB")
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
+        return self._augment(do, do, images, masks)
 
 class RandomErasing(Operation):
     """
@@ -1869,7 +1872,8 @@ class RandomErasing(Operation):
 
     Random Erasing can make a trained neural network more robust to occlusion.
     """
-    def __init__(self, probability, rectangle_area):
+    def __init__(self, probability, rectangle_area, affects_images=True,
+                 affects_masks=False):
         """
         The size of the random rectangle is controlled using the
         :attr:`rectangle_area` parameter. This area is random in its
@@ -1879,7 +1883,7 @@ class RandomErasing(Operation):
          performed.
         :param rectangle_area: The percentage are of the image to occlude.
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.rectangle_area = rectangle_area
 
     def perform_operation(self, images):
@@ -1919,20 +1923,15 @@ class RandomErasing(Operation):
 
             return image
 
-        augmented_images = []
-
-        for image in images:
-            augmented_images.append(do(image))
-
-        return augmented_images
-
-
+        return self._augment(do, do, images, masks)
+    
 class Custom(Operation):
     """
     Class that allows for a custom operation to be performed using Augmentor's
     standard :class:`~Augmentor.Pipeline.Pipeline` object.
     """
-    def __init__(self, probability, custom_function, **function_arguments):
+    def __init__(self, probability, affects_images, affects_masks,
+                 custom_function, **function_arguments):
         """
         Creates a custom operation that can be added to a pipeline.
 
@@ -1954,14 +1953,14 @@ class Custom(Operation):
         :type custom_function: \*Function
         :type function_arguments: dict
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.custom_function = custom_function
         self.function_arguments = function_arguments
 
     def __str__(self):
         return "Custom (" + self.custom_function.__name__ + ")"
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Perform the custom operation on the passed image(s), returning the
         transformed image(s).
@@ -1970,15 +1969,29 @@ class Custom(Operation):
         :return: The transformed image(s) (other functions in the pipeline
          will expect an image of type PIL.Image)
         """
-        return self.function_name(images, **self.function_arguments)
+        augmented_images = []
+        augmented_masks = []
 
+        if self.affects_images:
+            augmented_images = self.function_name(images, **self.function_argument)
+        else:
+            augmented_images = images
+
+        if self.affects_masks:
+            augmented_masks = self.function_name(masks, **self.function_argument)
+        else:
+            augmented_masks = masks
+
+        return images, masks
+    
 
 class ZoomGroundTruth(Operation):
     """
     This class is used to enlarge images (to zoom) but to return a cropped
     region of the zoomed image of the same size as the original image.
     """
-    def __init__(self, probability, min_factor, max_factor):
+    def __init__(self, probability, min_factor, max_factor,
+                 affects_images=True, affects_masks=True):
         """
         The amount of zoom applied is randomised, from between
         :attr:`min_factor` and :attr:`max_factor`. Set these both to the same
@@ -1996,11 +2009,11 @@ class ZoomGroundTruth(Operation):
         :type min_factor: Float
         :type max_factor: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.min_factor = min_factor
         self.max_factor = max_factor
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         Zooms/scales the passed images and returns the new images.
 
@@ -2010,12 +2023,12 @@ class ZoomGroundTruth(Operation):
         """
         factor = round(random.uniform(self.min_factor, self.max_factor), 2)
 
-        def do(image):
+        def do(image, resample):
 
             w, h = image.size
 
             # TODO: Join these two functions together so that we don't have this image_zoom variable lying around.
-            image_zoomed = image.resize((int(round(image.size[0] * factor)), int(round(image.size[1] * factor))), resample=Image.BICUBIC)
+            image_zoomed = image.resize((int(round(image.size[0] * factor)), int(round(image.size[1] * factor))), resample=resample)
             w_zoomed, h_zoomed = image_zoomed.size
 
             return image_zoomed.crop((floor((float(w_zoomed) / 2) - (float(w) / 2)),
@@ -2023,13 +2036,14 @@ class ZoomGroundTruth(Operation):
                                       floor((float(w_zoomed) / 2) + (float(w) / 2)),
                                       floor((float(h_zoomed) / 2) + (float(h) / 2))))
 
-        augmented_images = []
+        def do_image(image):
+            return do(image, Image.BICUBIC)
 
-        for image in images:
-            augmented_images.append(do(image))
+        def do_mask(mask):
+            return do(mask, Image.NEAREST)
 
-        return augmented_images
-
+        return self._augment(do_image, do_mask, images, masks)
+    
 
 class Mixup(Operation):
     """
@@ -2069,7 +2083,8 @@ class Mixup(Operation):
     :math:`\\alpha` result in less *mixup* effect whereas larger values would
     tend to result in overfitting.
     """
-    def __init__(self, probability, alpha=0.4):
+    def __init__(self, probability, alpha=0.4, affects_images=True,
+                 affects_masks=True):
         """
 
         .. note:: Not yet enabled!
@@ -2087,10 +2102,10 @@ class Mixup(Operation):
         :type probability: Float
         :type alpha: Float
         """
-        Operation.__init__(self, probability)
+        Operation.__init__(self, probability, affects_images, affects_masks)
         self.alpha = alpha
 
-    def perform_operation(self, images):
+    def perform_operation(self, images, masks):
         """
         This function is currently implemented but not **enabled**, as it
         requires each image's label in order to operate - something which
